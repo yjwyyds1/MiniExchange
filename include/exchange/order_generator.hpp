@@ -15,6 +15,7 @@ struct Event {
     Kind    kind = Kind::NewOrder;
     Order   order;       // kind == NewOrder 时有效
     OrderId cancel_id = 0;  // kind == CancelOrder 时有效
+    std::uint64_t enqueue_ns = 0;  // 流水线延迟测量用，不参与序列化
 };
 
 // 可复现的订单流：同一 seed 生成完全相同的 Event 序列。

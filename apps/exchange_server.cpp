@@ -1,6 +1,7 @@
 #include <cerrno>
 #include <cstdint>
 #include <cstring>
+#include <exception>
 #include <iostream>
 #include <sstream>
 #include <string>
