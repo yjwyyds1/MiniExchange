@@ -30,6 +30,9 @@ target_link_libraries(pipeline PRIVATE mini_exchange Threads::Threads)
 add_executable(spsc_bench apps/spsc_bench.cpp)
 target_link_libraries(spsc_bench PRIVATE mini_exchange Threads::Threads)
 
+add_executable(engine_bench apps/engine_bench.cpp)
+target_link_libraries(engine_bench PRIVATE mini_exchange Threads::Threads)
+
 include(CTest)
 if(BUILD_TESTING)
     foreach(test_name journal_test spsc_test matching_test replay_test pipeline_test)

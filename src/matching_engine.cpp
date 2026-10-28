@@ -4,6 +4,10 @@
 
 namespace exchange {
 
+void MatchingEngine::reserve(std::size_t expected_active_orders) {
+    orders_.reserve(expected_active_orders);
+}
+
 std::vector<Trade> MatchingEngine::match(Order& taker) {
     std::vector<Trade> trades;
 
@@ -100,11 +104,16 @@ bool MatchingEngine::cancel(OrderId id) {
 }
 
 std::optional<OrderStatus> MatchingEngine::statusOf(OrderId id) const {
-    auto it = orders_.find(id);
+    const auto it = orders_.find(id);
     if (it != orders_.end()) return it->second->status;
-    auto terminal = terminal_.find(id);
-    return terminal == terminal_.end() ? std::nullopt :
-           std::optional<OrderStatus>{terminal->second};
+
+    // 终态窗口是固定大小环形缓冲：从最新写入位置反向扫描。
+    for (std::size_t i = 0; i < terminal_count_; ++i) {
+        const std::size_t index =
+            (terminal_next_ + kTerminalLimit - 1 - i) % kTerminalLimit;
+        if (terminal_[index].id == id) return terminal_[index].status;
+    }
+    return std::nullopt;
 }
 
 Snapshot MatchingEngine::snapshot() const {
@@ -120,13 +129,10 @@ Snapshot MatchingEngine::snapshot() const {
 void MatchingEngine::eraseIndex(OrderId id) {
     const auto it = orders_.find(id);
     if (it == orders_.end()) return;
-    terminal_[id] = it->second->status;
-    terminal_order_.push_back(id);
+    terminal_[terminal_next_] = TerminalEntry{id, it->second->status};
+    terminal_next_ = (terminal_next_ + 1) % kTerminalLimit;
+    if (terminal_count_ < kTerminalLimit) ++terminal_count_;
     orders_.erase(it);
-    if (terminal_order_.size() > kTerminalLimit) {
-        terminal_.erase(terminal_order_.front());
-        terminal_order_.pop_front();
-    }
 }
 
 }  // namespace exchange

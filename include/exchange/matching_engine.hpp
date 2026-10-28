@@ -1,7 +1,7 @@
 #pragma once
 
+#include <array>
 #include <unordered_map>
-#include <deque>
 #include <vector>
 
 #include "order_book.hpp"
@@ -31,6 +31,9 @@ namespace exchange {
             Snapshot snapshot() const;                              // 顶层行情快照
             const OrderBook& book() const { return book_; }
 
+            // 可选优化：预分配活动单索引桶，减少热路径中的 rehash 抖动。
+            void reserve(std::size_t expected_active_orders);
+
         private:
             std::vector<Trade> match(Order& taker);  // 与对手方逐档撮合
             void eraseIndex(OrderId id);             // 订单终结时从索引移除
@@ -40,9 +43,15 @@ namespace exchange {
             std::unordered_map<OrderId, std::shared_ptr<Order>> orders_;
             // 客户端 ID 严格递增；high-water mark 保证不复用且只占 O(1) 内存。
             OrderId last_id_ = 0;
+            // 终态窗口：固定大小环形缓冲，避免每个终态订单的哈希/分配开销。
+            struct TerminalEntry {
+                OrderId id = 0;
+                OrderStatus status = OrderStatus::Rejected;
+            };
             static constexpr std::size_t kTerminalLimit = 4096;
-            std::unordered_map<OrderId, OrderStatus> terminal_;
-            std::deque<OrderId> terminal_order_;
+            std::array<TerminalEntry, kTerminalLimit> terminal_{};
+            std::size_t terminal_count_ = 0;
+            std::size_t terminal_next_ = 0;
             Sequence next_seq_ = 0;   // 订单与成交共用单调序号
     };
 
