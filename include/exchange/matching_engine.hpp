@@ -1,6 +1,9 @@
 #pragma once
 
 #include <array>
+#include <cstddef>
+#include <memory>
+#include <memory_resource>
 #include <unordered_map>
 #include <vector>
 
@@ -12,6 +15,15 @@ namespace exchange {
     // 撮合引擎：单线程模型。校验、撮合、订单生命周期管理都在这里。
     class MatchingEngine {
         public:
+            // use_pool=true 时，订单对象与控制块从 pmr 对象池分配；
+            // 默认 false：本机实测 PMR 池慢于 malloc 基线，保留为可选实验。
+            explicit MatchingEngine(bool use_pool = false);
+
+            MatchingEngine(MatchingEngine&&) noexcept = default;
+            MatchingEngine& operator=(MatchingEngine&& other);
+            MatchingEngine(const MatchingEngine&) = delete;
+            MatchingEngine& operator=(const MatchingEngine&) = delete;
+
             struct SubmitResult {
                 bool               accepted = false;
                 ErrorCode          error = ErrorCode::Ok;
@@ -38,6 +50,9 @@ namespace exchange {
             std::vector<Trade> match(Order& taker);  // 与对手方逐档撮合
             void eraseIndex(OrderId id);             // 订单终结时从索引移除
 
+            // 声明在 book_/orders_ 之前：析构时最后销毁，保证订单归还到有效池。
+            std::unique_ptr<std::pmr::unsynchronized_pool_resource> pool_;
+            bool use_pool_ = false;
             OrderBook book_;
             // 订单索引：id -> 订单。簿与索引各持一份 shared_ptr，生命周期安全
             std::unordered_map<OrderId, std::shared_ptr<Order>> orders_;

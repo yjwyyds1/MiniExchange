@@ -4,6 +4,31 @@
 
 namespace exchange {
 
+MatchingEngine::MatchingEngine(bool use_pool) : use_pool_(use_pool) {
+    if (use_pool_) {
+        pool_ = std::make_unique<std::pmr::unsynchronized_pool_resource>();
+    }
+}
+
+MatchingEngine& MatchingEngine::operator=(MatchingEngine&& other) {
+    if (this == &other) return *this;
+
+    // 先释放依赖旧 pool 的订单/索引，再替换 pool；否则会向已销毁的池归还内存。
+    book_ = OrderBook{};
+    orders_.clear();
+    terminal_ = {};
+    terminal_count_ = 0;
+    terminal_next_ = 0;
+
+    pool_ = std::move(other.pool_);
+    use_pool_ = other.use_pool_;
+    book_ = std::move(other.book_);
+    orders_ = std::move(other.orders_);
+    last_id_ = other.last_id_;
+    next_seq_ = other.next_seq_;
+    return *this;
+}
+
 void MatchingEngine::reserve(std::size_t expected_active_orders) {
     orders_.reserve(expected_active_orders);
 }
@@ -65,7 +90,13 @@ MatchingEngine::SubmitResult MatchingEngine::submit(Order order) {
     // ---- 到达：分配序号，登记索引 ----
     order.seq = next_seq_++;
     last_id_ = order.id;
-    auto sp = std::make_shared<Order>(order);
+    std::shared_ptr<Order> sp;
+    if (pool_) {
+        sp = std::allocate_shared<Order>(
+            std::pmr::polymorphic_allocator<Order>(pool_.get()), order);
+    } else {
+        sp = std::make_shared<Order>(order);
+    }
     orders_.emplace(order.id, sp);
 
     // ---- 撮合 ----

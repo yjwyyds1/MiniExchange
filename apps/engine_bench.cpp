@@ -108,22 +108,18 @@ struct BenchResult {
 };
 
 BenchResult run(Workload workload, std::uint64_t seed, std::size_t events,
-                bool reserve_maps, std::size_t reset_interval) {
+                bool use_pool, bool reserve_maps, std::size_t reset_interval) {
     WorkloadGenerator generator(workload, seed);
-    MatchingEngine engine;
-#ifndef BENCH_NO_RESERVE
+    MatchingEngine engine(use_pool);
     if (reserve_maps) engine.reserve(1u << 14);
-#endif
 
     const std::size_t warmup = std::min<std::size_t>(events, 50'000);
     for (std::size_t i = 0; i < warmup; ++i) {
         apply_event(engine, generator.next());
     }
 
-    engine = MatchingEngine{};
-#ifndef BENCH_NO_RESERVE
+    engine = MatchingEngine(use_pool);
     if (reserve_maps) engine.reserve(1u << 14);
-#endif
 
     BenchResult result;
     result.events = events;
@@ -139,10 +135,8 @@ BenchResult run(Workload workload, std::uint64_t seed, std::size_t events,
 
         // 周期性重置，避免订单簿无限膨胀导致性能漂移
         if ((i + 1) % reset_interval == 0) {
-            engine = MatchingEngine{};
-#ifndef BENCH_NO_RESERVE
+            engine = MatchingEngine(use_pool);
             if (reserve_maps) engine.reserve(1u << 14);
-#endif
         }
     }
     result.elapsed_ns = now_ns() - start;
@@ -191,8 +185,9 @@ int main(int argc, char** argv) {
     for (const Workload workload :
          {Workload::LimitHeavy, Workload::CancelHeavy, Workload::TradeHeavy}) {
         std::cout << workload_name(workload) << " events=" << events << '\n';
-        print_result("baseline", run(workload, seed, events, false, kResetInterval));
-        print_result("reserved", run(workload, seed, events, true, kResetInterval));
+        print_result("baseline", run(workload, seed, events, false, false, kResetInterval));
+        print_result("pool    ", run(workload, seed, events, true, false, kResetInterval));
+        print_result("pool+res", run(workload, seed, events, true, true, kResetInterval));
     }
     return 0;
 }

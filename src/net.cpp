@@ -43,12 +43,17 @@ bool recv_exact(int fd, void* data, std::size_t size) {
     return true;
 }
 
+}  // namespace
+
 bool set_nonblocking(int fd) {
     const int flags = ::fcntl(fd, F_GETFL, 0);
     return flags >= 0 && ::fcntl(fd, F_SETFL, flags | O_NONBLOCK) == 0;
 }
 
-}  // namespace
+bool set_tcp_nodelay(int fd) {
+    int one = 1;
+    return ::setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &one, sizeof(one)) == 0;
+}
 
 std::string encode_frame(std::string_view payload) {
     std::string frame(4, '\0');

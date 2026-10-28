@@ -294,6 +294,44 @@ void test_manual_orders_sequence() {
     REQUIRE(e.statusOf(8) == OrderStatus::Filled);
 }
 
+// 对象池（pmr）与 make_shared 基线必须产生完全相同的撮合结果
+void test_pool_matches_plain_engine() {
+    MatchingEngine pooled(true);
+    MatchingEngine plain(false);
+
+    for (OrderId id = 1; id <= 2000; ++id) {
+        Order order;
+        order.id = id;
+        order.side = (id % 3 == 0) ? Side::Sell : Side::Buy;
+        order.type = (id % 17 == 0) ? OrderType::Market : OrderType::Limit;
+        order.price = (order.type == OrderType::Market)
+            ? 0
+            : 9'990 + static_cast<Price>(id % 21);
+        order.qty = 1 + (id % 9);
+
+        const auto a = pooled.submit(order);
+        const auto b = plain.submit(order);
+        REQUIRE(a.accepted == b.accepted);
+        REQUIRE(a.error == b.error);
+        REQUIRE(a.status == b.status);
+        REQUIRE(a.unfilled_qty == b.unfilled_qty);
+        REQUIRE(a.trades.size() == b.trades.size());
+        for (std::size_t i = 0; i < a.trades.size(); ++i) {
+            REQUIRE(a.trades[i].buy_id == b.trades[i].buy_id);
+            REQUIRE(a.trades[i].sell_id == b.trades[i].sell_id);
+            REQUIRE(a.trades[i].price == b.trades[i].price);
+            REQUIRE(a.trades[i].qty == b.trades[i].qty);
+            REQUIRE(a.trades[i].seq == b.trades[i].seq);
+        }
+    }
+
+    const auto a = pooled.snapshot();
+    const auto b = plain.snapshot();
+    REQUIRE(a.best_bid == b.best_bid && a.best_ask == b.best_ask);
+    REQUIRE(a.bid_qty == b.bid_qty && a.ask_qty == b.ask_qty);
+    REQUIRE(a.seq == b.seq);
+}
+
 }  // namespace
 
 int main() {
@@ -324,6 +362,7 @@ int main() {
     run("terminal_window", test_terminal_window);
     run("order_book_reduce", test_order_book_reduce);
     run("manual_orders_sequence", test_manual_orders_sequence);
+    run("pool_matches_plain_engine", test_pool_matches_plain_engine);
 
     if (failed != 0) {
         std::cout << failed << " test(s) failed\n";

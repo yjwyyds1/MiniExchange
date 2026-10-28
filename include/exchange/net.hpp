@@ -23,6 +23,8 @@ std::optional<std::string> recv_frame(int fd);
 
 int make_listener(std::uint16_t port);
 int connect_to(const char* host, std::uint16_t port);
+bool set_nonblocking(int fd);
+bool set_tcp_nodelay(int fd);
 
 // ---- UDP / 组播 ----
 
