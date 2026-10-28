@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.22)
-project(MiniExchange VERSION 0.4.0 LANGUAGES CXX)
+project(MiniExchange VERSION 1.1.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -14,6 +14,7 @@ add_library(mini_exchange
     src/order_generator.cpp
     src/replay.cpp
     src/pipeline.cpp
+    src/market_data.cpp
 )
 target_include_directories(mini_exchange PUBLIC include)
 target_compile_options(mini_exchange PRIVATE -Wall -Wextra -Wpedantic)
@@ -35,7 +36,7 @@ target_link_libraries(engine_bench PRIVATE mini_exchange Threads::Threads)
 
 include(CTest)
 if(BUILD_TESTING)
-    foreach(test_name journal_test spsc_test matching_test replay_test pipeline_test)
+    foreach(test_name journal_test spsc_test matching_test replay_test pipeline_test market_data_test)
         add_executable(${test_name} tests/${test_name}.cpp)
         target_link_libraries(${test_name} PRIVATE mini_exchange Threads::Threads)
         add_test(NAME ${test_name} COMMAND ${test_name})
@@ -53,6 +54,12 @@ if(UNIX)
 
     add_executable(sample_client apps/sample_client.cpp)
     target_link_libraries(sample_client PRIVATE mini_exchange exchange_net Threads::Threads)
+
+    add_executable(md_publisher apps/md_publisher.cpp)
+    target_link_libraries(md_publisher PRIVATE mini_exchange exchange_net Threads::Threads)
+
+    add_executable(md_receiver apps/md_receiver.cpp)
+    target_link_libraries(md_receiver PRIVATE mini_exchange exchange_net Threads::Threads)
 
     if(BUILD_TESTING)
         add_executable(framing_test tests/framing_test.cpp)

@@ -2,6 +2,8 @@
 
 #include <arpa/inet.h>
 #include <cerrno>
+#include <cstring>
+#include <fcntl.h>
 #include <netinet/in.h>
 #include <netinet/tcp.h>
 #include <sys/socket.h>
@@ -26,7 +28,6 @@ std::uint32_t load_le32(const char* in) {
            (static_cast<std::uint32_t>(static_cast<unsigned char>(in[3])) << 24);
 }
 
-// 读满 size 字节：处理不完整读、EINTR、对端关闭
 bool recv_exact(int fd, void* data, std::size_t size) {
     auto* p = static_cast<char*>(data);
     while (size > 0) {
@@ -40,6 +41,11 @@ bool recv_exact(int fd, void* data, std::size_t size) {
         size -= static_cast<std::size_t>(n);
     }
     return true;
+}
+
+bool set_nonblocking(int fd) {
+    const int flags = ::fcntl(fd, F_GETFL, 0);
+    return flags >= 0 && ::fcntl(fd, F_SETFL, flags | O_NONBLOCK) == 0;
 }
 
 }  // namespace
@@ -125,6 +131,125 @@ int connect_to(const char* host, std::uint16_t port) {
         return -1;
     }
     return fd;
+}
+
+std::optional<sockaddr_in> udp_address(const char* host, std::uint16_t port) {
+    sockaddr_in addr{};
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(port);
+    if (::inet_pton(AF_INET, host, &addr.sin_addr) != 1) return std::nullopt;
+    return addr;
+}
+
+std::optional<UdpSocket> udp_sender(const char* host, std::uint16_t port,
+                                    bool multicast) {
+    const int fd = ::socket(AF_INET, SOCK_DGRAM, 0);
+    if (fd < 0) return std::nullopt;
+
+    if (multicast) {
+        int ttl = 1;
+        ::setsockopt(fd, IPPROTO_IP, IP_MULTICAST_TTL, &ttl, sizeof(ttl));
+        unsigned char loop = 1;
+        ::setsockopt(fd, IPPROTO_IP, IP_MULTICAST_LOOP, &loop, sizeof(loop));
+    }
+
+    const auto target = udp_address(host, port);
+    if (!target) {
+        ::close(fd);
+        return std::nullopt;
+    }
+    return UdpSocket{fd, *target};
+}
+
+int udp_receiver(std::uint16_t port, const char* multicast_group) {
+    const int fd = ::socket(AF_INET, SOCK_DGRAM, 0);
+    if (fd < 0) return -1;
+
+    int one = 1;
+    ::setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one));
+    int rcvbuf = 1 << 20;
+    ::setsockopt(fd, SOL_SOCKET, SO_RCVBUF, &rcvbuf, sizeof(rcvbuf));
+
+    sockaddr_in addr{};
+    addr.sin_family = AF_INET;
+    addr.sin_addr.s_addr = htonl(INADDR_ANY);
+    addr.sin_port = htons(port);
+    if (::bind(fd, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) != 0) {
+        ::close(fd);
+        return -1;
+    }
+
+    if (multicast_group != nullptr) {
+        ip_mreq membership{};
+        if (::inet_pton(AF_INET, multicast_group, &membership.imr_multiaddr) != 1) {
+            ::close(fd);
+            return -1;
+        }
+        membership.imr_interface.s_addr = htonl(INADDR_ANY);
+        if (::setsockopt(fd, IPPROTO_IP, IP_ADD_MEMBERSHIP, &membership,
+                         sizeof(membership)) != 0) {
+            ::close(fd);
+            return -1;
+        }
+    }
+
+    if (!set_nonblocking(fd)) {
+        ::close(fd);
+        return -1;
+    }
+    return fd;
+}
+
+int udp_control_socket(std::uint16_t port) {
+    const int fd = ::socket(AF_INET, SOCK_DGRAM, 0);
+    if (fd < 0) return -1;
+
+    int one = 1;
+    ::setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one));
+
+    sockaddr_in addr{};
+    addr.sin_family = AF_INET;
+    addr.sin_addr.s_addr = htonl(INADDR_ANY);
+    addr.sin_port = htons(port);
+    if (::bind(fd, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) != 0 ||
+        !set_nonblocking(fd)) {
+        ::close(fd);
+        return -1;
+    }
+    return fd;
+}
+
+bool udp_send_to(int fd, const sockaddr_in& target, std::string_view payload) {
+    for (;;) {
+        const ssize_t n = ::sendto(
+            fd, payload.data(), payload.size(), 0,
+            reinterpret_cast<const sockaddr*>(&target), sizeof(target));
+        if (n < 0) {
+            if (errno == EINTR) continue;
+            return false;
+        }
+        return static_cast<std::size_t>(n) == payload.size();
+    }
+}
+
+std::optional<std::pair<std::string, sockaddr_in>> udp_recv_from(
+    int fd, sockaddr_in* sender) {
+    std::string buffer(65536, '\0');
+    sockaddr_in from{};
+    socklen_t from_length = sizeof(from);
+
+    for (;;) {
+        const ssize_t n = ::recvfrom(
+            fd, buffer.data(), buffer.size(), 0,
+            reinterpret_cast<sockaddr*>(&from), &from_length);
+        if (n < 0) {
+            if (errno == EINTR) continue;
+            return std::nullopt;  // EAGAIN 或其他错误
+        }
+        buffer.resize(static_cast<std::size_t>(n));
+        if (sender != nullptr) *sender = from;
+        return std::make_pair(buffer, from);
+    }
 }
 
 }  // namespace net
